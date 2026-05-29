@@ -33,6 +33,24 @@ body {
   height: 100%;
 }
 
+.ui-mode-btn {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  z-index: 6;
+  border: 1px solid #5b7892;
+  background: color-mix(in oklab, #112535 84%, transparent);
+  color: #e7f2fb;
+  border-radius: 999px;
+  padding: 5px 12px;
+  font-size: 0.76rem;
+  cursor: pointer;
+}
+
+.ui-mode-btn:hover {
+  border-color: #9cc5ea;
+}
+
 #globe-canvas {
   width: 100%;
   height: 100%;
@@ -47,6 +65,13 @@ body {
   border: 1px solid #42627e;
   border-radius: 14px;
   box-shadow: 0 14px 40px rgba(0, 0, 0, 0.32);
+  transition: opacity 220ms ease, transform 220ms ease;
+}
+
+.app-shell.ui-collapsed .panel {
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(10px) scale(0.98);
 }
 
 .panel-left {
@@ -106,6 +131,12 @@ body {
   border-color: #ffd490;
   background: #304332;
   color: #fff3d8;
+}
+
+.chip-shot {
+  width: 100%;
+  justify-content: center;
+  display: inline-flex;
 }
 
 input[type="range"] {
@@ -186,4 +217,3 @@ input[type="range"] {
     font-size: 0.77rem;
   }
 }
-

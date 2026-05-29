@@ -1,56 +1,75 @@
-# 全球地区特色地球可视化 - 交付计划
+# World Tour Globe Delivery Plan
 
-更新时间：2026-05-29  
-状态：已完成（本轮交付）
+Updated: 2026-05-29  
+Status: completed (current round)
 
-## 1. 交付目标
+## 1. Goal
 
-基于 `PRD-全球地区特色地球可视化.md`，将当前仓库从初始化骨架推进到可验收版本，覆盖 M1~M4 的可运行实现，并通过本地构建验证。
+Implement a production-usable globe demo from the PRD with:
 
-## 2. 执行策略
+- clear regional differentiation,
+- switchable storytelling themes,
+- destination-level narrative interaction,
+- stable desktop/mobile interaction quality.
 
-1. 先实现核心体验链路，再做视觉收敛。
-2. 任何改动都以 DoD 为准，避免偏离“区域识别优先”。
-3. 每个里程碑完成后都进行一次可运行性验证。
+## 2. Milestones and Status
 
-## 3. 里程碑与任务清单
+### M1 Regional readability
 
-### M1 区域识别强化（已完成）
-- [x] 统一地球图层到 `planetGroup`，修复自转后聚焦定位偏差。
-- [x] 强化区域底色与边界层次。
-- [x] 增加选中态高亮（脉冲环/边缘增强）。
+- [x] Unified all globe layers under `planetGroup` for consistent transform logic.
+- [x] Strengthened region fill + border hierarchy.
+- [x] Added active pulse halo for fast region recognition.
 
-### M2 主题图层质量提升（已完成）
-- [x] `flowers`：花簇粒子层次与密度联动。
-- [x] `fairy`：萤火粒子 + 柔光轨迹动画。
-- [x] `destinations`：点位与连线增强，支持平滑显隐。
+### M2 Theme quality
 
-### M3 目的地叙事完善（已完成）
-- [x] 点击目的地触发信息卡与镜头聚焦联动。
-- [x] 导览模式轮播区域时同步视觉与 UI。
-- [x] 信息卡移动端可读性优化。
+- [x] Improved `flowers` into multi-layer clustered particles.
+- [x] Improved `fairy` into firefly particles + soft trails.
+- [x] Improved `destinations` markers/routes with smooth visibility blending.
 
-### M4 性能与视觉统一收敛（已完成）
-- [x] 主题开关渐入渐出，避免闪烁。
-- [x] 低性能设备粒子/特效自动降级。
-- [x] 文档更新并完成构建验收。
+### M3 Destination storytelling
 
-## 4. 验收映射（DoD）
+- [x] Click destination => info card + camera focus.
+- [x] Guided mode now synchronizes region/theme/destination.
+- [x] Mobile panel readability improved.
 
-1. 3 秒识别区域：通过边界、底色、选中态三层强化实现。
-2. 三主题差异清晰：通过图层分离和过渡控制实现。
-3. 任一区域可点击目的地：每区保留 3 个目的地点位与信息卡。
-4. 无阻断错误：以 `npm run build` 作为最低质量门禁。
-5. 桌面/移动可交互：依赖 OrbitControls + 响应式面板 + 低端降级。
+### M4 Performance and visual convergence
 
-## 5. 风险控制
+- [x] Smooth per-theme fade in/out to avoid flicker.
+- [x] Low-tier adaptive particle budgets.
+- [x] Build gate validated with `npm run build`.
 
-- 图层噪声风险：叠加时自动压低各层透明度并限制强度上限。
-- 性能风险：基于屏幕宽度与设备内存进行分级粒子预算。
-- 风格偏差风险：最终阶段按关键帧方向收敛色彩与光效。
+## 3. Post-M4 Enhancements Completed
 
-## 6. 交付结果
+- [x] Keyframe-oriented visual alignment:
+  - darker ocean base,
+  - stronger atmosphere rim,
+  - aurora-like polar band,
+  - tuned lighting and camera baseline.
+- [x] Destination coverage expanded to 5 per region (40 total).
+- [x] Scripted guided-tour sequence with theme presets.
+- [x] Live status line with FPS and performance tier.
 
-- 已完成代码主路径：`src/app.ts` + `src/style.css`。
-- 已实现区域、主题、目的地三类核心交互闭环。
-- 已完成 `npm run build` 验证，可直接以 `npm run dev` 预览。
+## 4. Frame-Gap Round (1-6) Completed
+
+- [x] 1. Replaced hand-drawn land approximation with GeoJSON-driven world contours.
+- [x] 2. Replaced procedural-only vegetation with PNG atlas-based sprite usage.
+- [x] 3. Added layered vertical depth (ground/canopy/tall canopy/blossom) and elevation jitter.
+- [x] 4. Added shader ocean with animated wave bands and coastline spray transition.
+- [x] 5. Calibrated cinematic camera presets to keyframes `001/008/013/017`.
+- [x] 6. Reduced tool-like UI presence with default-collapsed control panels.
+
+## 5. Definition of Done Mapping
+
+1. Region recognizability in <= 3 seconds: addressed by fill/border/halo layers.
+2. Clear theme difference: addressed by isolated layers and smooth blend control.
+3. Clickable destinations in every region: guaranteed by 5 destinations per region.
+4. No blocking errors: validated by build success.
+5. Core interactions on desktop/mobile: rotate, zoom, switch, click all supported.
+
+## 6. Verification
+
+```bash
+npm run build
+```
+
+Result: pass (with expected Three.js bundle-size warning only).
