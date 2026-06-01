@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "skills": {
+    "otto-research-skill": {
+      "source": "wang-jie-2020/otto",
+      "sourceType": "github",
+      "skillPath": "skills/otto-research-skill/SKILL.md",
+      "computedHash": "0a948783585a04a382987cfdacf90f52b17853e79e739d8f972bf0b1dc37ec71"
+    },
+    "otto-review-goal": {
+      "source": "wang-jie-2020/otto",
+      "sourceType": "github",
+      "skillPath": "skills/otto-review-skill/SKILL.md",
+      "computedHash": "b26ddd16534f4ec90749734856a899069b1cd7869819f94ab5d97223e4491ca3"
+    }
+  }
+}

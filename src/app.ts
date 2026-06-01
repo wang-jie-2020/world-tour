@@ -3,14 +3,24 @@ import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js";
 import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
 import { ShaderPass } from "three/examples/jsm/postprocessing/ShaderPass.js";
-import { DESTINATIONS, REGIONS, THEME_LABELS } from "./data";
+import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";
+import {
+  DESTINATIONS,
+  NARRATIVE_NODE_COUNT,
+  REGIONS,
+  STORY_VARIANT,
+  THEME_CONFIGS,
+  THEME_LABELS
+} from "./data";
 import { buildRegionBoundary, latLonToVector3, randomPointInCap } from "./geo";
-import type { Destination, FocusAnimation, Region, RegionId, ThemeId } from "./types";
+import type { Destination, FocusAnimation, Region, RegionId, ThemeConfig, ThemeId } from "./types";
 import worldContoursGeoJson from "./assets/world-contours.json";
 import vegetationAtlasUrl from "./assets/vegetation/vegetation-atlas.png";
 
 const RADIUS = 1;
-const THEME_IDS: ThemeId[] = ["flowers", "fairy", "destinations"];
+const FLOWERS_THEME = "flowers";
+const FAIRY_THEME = "fairy";
+const DESTINATIONS_THEME = "destinations";
 const AUTO_ROTATE_SPEED = 0.0009;
 const AURORA_COLORS = ["#6df1d6", "#95f3ff", "#bd9dff", "#ff8fe8"];
 const LAND_BASE_COLORS = ["#1b2b1e", "#243425", "#303927", "#3c3226"];
@@ -23,6 +33,8 @@ type DestinationMesh = THREE.Mesh<THREE.SphereGeometry, THREE.MeshStandardMateri
   userData: {
     destination: Destination;
     pulsePhase: number;
+    markerStyle: "dot" | "ring" | "beam";
+    priorityScale: number;
   };
 };
 
@@ -129,6 +141,9 @@ interface LookProfile {
   warmth: number;
   vignette: number;
   bloomish: number;
+  bloomStrength: number;
+  bloomRadius: number;
+  bloomThreshold: number;
 }
 
 const TOUR_STEPS: GuidedTourStep[] = [
@@ -347,21 +362,27 @@ const VEGETATION_VARIANT_URLS = Object.values(
 const LOOK_PROFILES: Record<LookProfile["id"], LookProfile> = {
   baseline: {
     id: "baseline",
-    exposure: 1.03,
-    contrast: 1.04,
-    saturation: 0.94,
-    warmth: 0.02,
-    vignette: 0.08,
-    bloomish: 0.08
+    exposure: 1.06,
+    contrast: 1.08,
+    saturation: 0.96,
+    warmth: 0.03,
+    vignette: 0.1,
+    bloomish: 0.06,
+    bloomStrength: 0.38,
+    bloomRadius: 0.28,
+    bloomThreshold: 0.48
   },
   target: {
     id: "target",
-    exposure: 1.17,
-    contrast: 1.16,
-    saturation: 1.04,
-    warmth: 0.09,
-    vignette: 0.18,
-    bloomish: 0.16
+    exposure: 1.2,
+    contrast: 1.2,
+    saturation: 1.07,
+    warmth: 0.1,
+    vignette: 0.16,
+    bloomish: 0.1,
+    bloomStrength: 0.82,
+    bloomRadius: 0.42,
+    bloomThreshold: 0.33
   }
 };
 
@@ -465,11 +486,11 @@ export function bootstrap(root: HTMLDivElement): void {
     powerPreference: perfTier === "low" ? "low-power" : "high-performance"
   });
   renderer.setPixelRatio(
-    Math.min(window.devicePixelRatio, tierValue(perfTier, 1.35, 1.7, 2))
+    Math.min(window.devicePixelRatio, tierValue(perfTier, 1.55, 2.05, 2.4))
   );
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.15;
+  renderer.toneMappingExposure = 1.2;
 
   const scene = new THREE.Scene();
   scene.fog = new THREE.Fog("#050b13", 2.8, 8.4);
@@ -486,8 +507,15 @@ export function bootstrap(root: HTMLDivElement): void {
 
   const composer = new EffectComposer(renderer);
   const renderPass = new RenderPass(scene, camera);
+  const bloomPass = new UnrealBloomPass(
+    new THREE.Vector2(window.innerWidth, window.innerHeight),
+    LOOK_PROFILES.target.bloomStrength,
+    LOOK_PROFILES.target.bloomRadius,
+    LOOK_PROFILES.target.bloomThreshold
+  );
   const colorGradePass = createColorGradePass();
   composer.addPass(renderPass);
+  composer.addPass(bloomPass);
   composer.addPass(colorGradePass);
 
   const ambient = new THREE.AmbientLight("#8eaed1", 0.32);
@@ -523,7 +551,7 @@ export function bootstrap(root: HTMLDivElement): void {
     new THREE.MeshBasicMaterial({
       color: "#7caeff",
       transparent: true,
-      opacity: 0.13,
+      opacity: 0.16,
       depthWrite: false
     })
   );
@@ -534,7 +562,7 @@ export function bootstrap(root: HTMLDivElement): void {
     new THREE.MeshBasicMaterial({
       color: "#8497ff",
       transparent: true,
-      opacity: 0.17,
+      opacity: 0.22,
       blending: THREE.AdditiveBlending,
       side: THREE.BackSide,
       depthWrite: false
@@ -616,7 +644,7 @@ export function bootstrap(root: HTMLDivElement): void {
     destinationMaterials.push(marker.material);
     destinationGroup.add(marker);
   });
-  const routeMaterials = rebuildDestinationRoutes(routeGroup);
+  const routeMaterials = rebuildDestinationRoutes(routeGroup, DESTINATIONS);
 
   const flowerRuntime = createFlowerLayer(landRuntime.flowerSeeds, perfTier, plantTextures);
   flowerGroup.add(flowerRuntime.group);
@@ -625,7 +653,33 @@ export function bootstrap(root: HTMLDivElement): void {
   fairyGroup.add(fairyRuntime.group);
 
   let selectedRegion: RegionId = "europe";
-  const activeThemes = new Set<ThemeId>(["flowers", "destinations"]);
+  const fallbackThemeConfigs: ThemeConfig[] = Object.entries(THEME_LABELS).map(([id, label]) => ({
+    id,
+    label,
+    enabledByDefault: id === FLOWERS_THEME || id === DESTINATIONS_THEME,
+    stackable: true
+  }));
+  const themeConfigs = (THEME_CONFIGS.length > 0 ? THEME_CONFIGS : fallbackThemeConfigs).map((theme) => ({
+    ...theme,
+    label: theme.label || theme.id
+  }));
+  const themeConfigById = new Map(themeConfigs.map((theme) => [theme.id, theme]));
+  const availableThemeIds = new Set(themeConfigs.map((theme) => theme.id));
+  const defaultThemeIds = themeConfigs
+    .filter((theme) => theme.enabledByDefault)
+    .map((theme) => theme.id);
+  const activeThemes = new Set<ThemeId>(
+    defaultThemeIds.length > 0
+      ? defaultThemeIds
+      : [FLOWERS_THEME, DESTINATIONS_THEME].filter((id) => availableThemeIds.has(id))
+  );
+  if (activeThemes.size === 0 && themeConfigs.length > 0) {
+    activeThemes.add(themeConfigs[0].id);
+  }
+  const getThemeRenderNumber = (themeId: ThemeId, key: string, fallback: number): number => {
+    const value = themeConfigById.get(themeId)?.renderProfile?.[key];
+    return typeof value === "number" ? value : fallback;
+  };
   let intensity = Number(intensitySliderNode.value);
   let autoRotate = true;
   let guidedTour = false;
@@ -658,7 +712,7 @@ export function bootstrap(root: HTMLDivElement): void {
     updateStatusLine();
   });
 
-  renderThemeChips(themeChipsNode, activeThemes, (themeId) => {
+  renderThemeChips(themeChipsNode, themeConfigs, activeThemes, (themeId) => {
     if (guidedTour) {
       guidedTour = false;
       guidedTourInputNode.checked = false;
@@ -791,6 +845,9 @@ export function bootstrap(root: HTMLDivElement): void {
     }
 
     renderer.toneMappingExposure = currentLook.exposure;
+    bloomPass.strength = currentLook.bloomStrength;
+    bloomPass.radius = currentLook.bloomRadius;
+    bloomPass.threshold = currentLook.bloomThreshold;
     colorGradePass.uniforms.uContrast.value = currentLook.contrast;
     colorGradePass.uniforms.uSaturation.value = currentLook.saturation;
     colorGradePass.uniforms.uWarmth.value = currentLook.warmth;
@@ -816,7 +873,11 @@ export function bootstrap(root: HTMLDivElement): void {
 
   function applyThemePreset(themes: ThemeId[]): void {
     activeThemes.clear();
-    themes.forEach((theme) => activeThemes.add(theme));
+    themes.forEach((theme) => {
+      if (availableThemeIds.has(theme)) {
+        activeThemes.add(theme);
+      }
+    });
     updateThemeChipState(themeChipsNode, activeThemes);
   }
 
@@ -864,7 +925,8 @@ export function bootstrap(root: HTMLDivElement): void {
     const region = REGIONS.find((item) => item.id === destination.regionId);
     infoTitleNode.textContent = destination.name;
     infoRegionNode.textContent = `Region: ${region?.label ?? destination.regionId}`;
-    infoTagsNode.textContent = `Tags: ${destination.tags.join(", ")}`;
+    const detail = destination.description ? ` | ${destination.description}` : "";
+    infoTagsNode.textContent = `Tags: ${destination.tags.join(", ")}${detail}`;
     infoCardNode.classList.remove("hidden");
   }
 
@@ -874,13 +936,13 @@ export function bootstrap(root: HTMLDivElement): void {
 
   function updateStatusLine(): void {
     const region = REGIONS.find((item) => item.id === selectedRegion);
-    const activeThemeLabels = THEME_IDS.filter((theme) => activeThemes.has(theme)).map(
-      (theme) => THEME_LABELS[theme]
-    );
+    const activeThemeLabels = themeConfigs
+      .filter((theme) => activeThemes.has(theme.id))
+      .map((theme) => theme.label || THEME_LABELS[theme.id] || theme.id);
     const themeText = activeThemeLabels.length > 0 ? activeThemeLabels.join(" + ") : "None";
     const perfText = perfTier === "low" ? "Low" : perfTier === "medium" ? "Medium" : "High";
     const abText = compareMode === "target" ? "Target" : "Baseline";
-    statusLineNode.textContent = `${region?.label ?? selectedRegion} | Themes: ${themeText} | Shot ${shotLabel} | A/B ${abText} | FPS ${Math.round(smoothedFps)} | Perf ${perfText}`;
+    statusLineNode.textContent = `${region?.label ?? selectedRegion} | Themes: ${themeText} | Shot ${shotLabel} | A/B ${abText} | Story ${STORY_VARIANT} (${NARRATIVE_NODE_COUNT}) | FPS ${Math.round(smoothedFps)} | Perf ${perfText}`;
   }
 
   function getWorldPoint(local: THREE.Vector3): THREE.Vector3 {
@@ -890,7 +952,8 @@ export function bootstrap(root: HTMLDivElement): void {
   function startFocusAnimation(
     toPosition: THREE.Vector3,
     toTarget: THREE.Vector3,
-    immediate = false
+    immediate = false,
+    durationMs = 420
   ): void {
     focusAnimation = {
       fromPosition: camera.position.clone(),
@@ -898,7 +961,7 @@ export function bootstrap(root: HTMLDivElement): void {
       fromTarget: controls.target.clone(),
       toTarget,
       startTime: performance.now(),
-      durationMs: immediate ? 1 : 420
+      durationMs: immediate ? 1 : durationMs
     };
   }
 
@@ -918,13 +981,19 @@ export function bootstrap(root: HTMLDivElement): void {
   }
 
   function focusDestination(destination: Destination): void {
-    camera.fov = 41;
+    const configuredFov = destination.camera?.fov ?? 41;
+    const configuredDistance = destination.camera?.distance ?? 2.12;
+    const configuredDuration = destination.camera?.durationMs ?? 420;
+    camera.fov = configuredFov;
     camera.updateProjectionMatrix();
     const localPoint = latLonToVector3(destination.lat, destination.lon, RADIUS + 0.02);
     const worldPoint = getWorldPoint(localPoint);
-    const cameraPoint = worldPoint.clone().multiplyScalar(2.12).add(new THREE.Vector3(0, 0.03, 0));
+    const cameraPoint = worldPoint
+      .clone()
+      .multiplyScalar(configuredDistance)
+      .add(new THREE.Vector3(0, 0.03, 0));
     const lookTarget = worldPoint.clone().multiplyScalar(0.52);
-    startFocusAnimation(cameraPoint, lookTarget);
+    startFocusAnimation(cameraPoint, lookTarget, false, configuredDuration);
   }
 
   function updateFocusAnimation(now: number): void {
@@ -945,6 +1014,7 @@ export function bootstrap(root: HTMLDivElement): void {
     const height = window.innerHeight;
     renderer.setSize(width, height, false);
     composer.setSize(width, height);
+    bloomPass.setSize(width, height);
     camera.aspect = width / height;
     camera.updateProjectionMatrix();
   }
@@ -981,12 +1051,24 @@ export function bootstrap(root: HTMLDivElement): void {
     const clampedIntensity = THREE.MathUtils.clamp(intensityValue, 0.4, 1.8);
     const lookDensity = compareMode === "target" ? 1 : 0.72;
     const intensityFactor = (0.55 + clampedIntensity * 0.45) * lookDensity;
+    const flowersOpacityScale = getThemeRenderNumber(FLOWERS_THEME, "opacityScale", 1);
+    const flowersSizeScale = getThemeRenderNumber(FLOWERS_THEME, "sizeScale", 1);
+    const fairyOpacityScale = getThemeRenderNumber(FAIRY_THEME, "opacityScale", 1);
+    const fairyTrailOpacityScale = getThemeRenderNumber(FAIRY_THEME, "trailOpacityScale", 1);
+    const fairyRotationSpeedScale = getThemeRenderNumber(FAIRY_THEME, "rotationSpeedScale", 1);
+    const destinationsOpacityScale = getThemeRenderNumber(DESTINATIONS_THEME, "opacityScale", 1);
+    const destinationsRouteOpacityScale = getThemeRenderNumber(
+      DESTINATIONS_THEME,
+      "routeOpacityScale",
+      1
+    );
+    const destinationsEmissiveScale = getThemeRenderNumber(DESTINATIONS_THEME, "emissiveScale", 1);
 
-    flowersWeight = moveTowards(flowersWeight, activeThemes.has("flowers") ? 1 : 0, 0.08);
-    fairyWeight = moveTowards(fairyWeight, activeThemes.has("fairy") ? 1 : 0, 0.08);
+    flowersWeight = moveTowards(flowersWeight, activeThemes.has(FLOWERS_THEME) ? 1 : 0, 0.08);
+    fairyWeight = moveTowards(fairyWeight, activeThemes.has(FAIRY_THEME) ? 1 : 0, 0.08);
     destinationsWeight = moveTowards(
       destinationsWeight,
-      activeThemes.has("destinations") ? 1 : 0,
+      activeThemes.has(DESTINATIONS_THEME) ? 1 : 0,
       0.08
     );
 
@@ -996,43 +1078,51 @@ export function bootstrap(root: HTMLDivElement): void {
     routeGroup.visible = destinationsWeight > 0.015;
 
     flowerRuntime.layers.forEach((layer) => {
-      layer.material.opacity = layer.baseOpacity * flowersWeight * intensityFactor;
-      layer.material.size = layer.baseSize * (0.7 + clampedIntensity * 0.35);
+      layer.material.opacity = layer.baseOpacity * flowersWeight * intensityFactor * flowersOpacityScale;
+      layer.material.size = layer.baseSize * (0.7 + clampedIntensity * 0.35) * flowersSizeScale;
     });
 
     const fairyPulse = 0.5 + 0.5 * Math.sin(elapsed * 1.9);
-    fairyRuntime.pointMaterial.opacity = (0.08 + 0.2 * fairyPulse) * fairyWeight * intensityFactor;
+    fairyRuntime.pointMaterial.opacity =
+      (0.08 + 0.2 * fairyPulse) * fairyWeight * intensityFactor * fairyOpacityScale;
     fairyRuntime.pointMaterial.size = 0.012 + 0.01 * (0.5 + 0.5 * Math.sin(elapsed * 1.2));
 
     fairyRuntime.trails.forEach((trail) => {
       const wave = 0.5 + 0.5 * Math.sin(elapsed * trail.userData.speed + trail.userData.phase);
-      trail.material.opacity = (0.05 + 0.24 * wave) * fairyWeight * intensityFactor;
+      trail.material.opacity =
+        (0.05 + 0.24 * wave) * fairyWeight * intensityFactor * fairyTrailOpacityScale;
     });
-    fairyGroup.rotation.y += 0.0005;
+    fairyGroup.rotation.y += 0.0005 * fairyRotationSpeedScale;
 
     destinationMeshes.forEach((mesh) => {
       const wave = 0.7 + 0.3 * Math.sin(elapsed * 2.8 + mesh.userData.pulsePhase);
       const scale = 0.8 + destinationsWeight * intensityFactor * wave * 0.4;
       mesh.scale.setScalar(scale);
-      mesh.material.opacity = 0.1 + destinationsWeight * 0.9;
-      mesh.material.emissiveIntensity = 0.16 + destinationsWeight * intensityFactor * 1.35;
+      mesh.material.opacity = (0.1 + destinationsWeight * 0.9) * destinationsOpacityScale;
+      mesh.material.emissiveIntensity =
+        (0.16 + destinationsWeight * intensityFactor * 1.35) * destinationsEmissiveScale;
     });
     destinationMaterials.forEach((material) => {
       material.roughness = 0.46 - destinationsWeight * 0.17;
     });
     routeMaterials.forEach((material) => {
-      material.opacity = (0.04 + 0.45 * destinationsWeight) * intensityFactor;
+      material.opacity =
+        (0.04 + 0.45 * destinationsWeight) * intensityFactor * destinationsRouteOpacityScale;
     });
 
     landRuntime.baseMaterial.opacity = (0.5 + 0.18 * intensityFactor) * 0.82;
     landRuntime.baseMaterial.size = 0.02 + clampedIntensity * 0.007;
-    landRuntime.canopyMaterial.opacity = (0.24 + 0.42 * flowersWeight) * intensityFactor;
-    landRuntime.canopyMaterial.size = 0.021 + clampedIntensity * 0.012;
-    landRuntime.tallCanopyMaterial.opacity = (0.12 + 0.35 * flowersWeight) * (0.7 + intensityFactor * 0.28);
-    landRuntime.tallCanopyMaterial.size = 0.028 + clampedIntensity * 0.017;
-    landRuntime.blossomMaterial.opacity = (0.05 + 0.46 * flowersWeight) * intensityFactor;
-    landRuntime.blossomMaterial.size = 0.025 + clampedIntensity * 0.014;
-    landRuntime.coastSprayMaterial.opacity = (0.12 + 0.2 * flowersWeight) * (0.6 + intensityFactor * 0.35);
+    landRuntime.canopyMaterial.opacity =
+      (0.24 + 0.42 * flowersWeight) * intensityFactor * flowersOpacityScale;
+    landRuntime.canopyMaterial.size = (0.021 + clampedIntensity * 0.012) * flowersSizeScale;
+    landRuntime.tallCanopyMaterial.opacity =
+      (0.12 + 0.35 * flowersWeight) * (0.7 + intensityFactor * 0.28) * flowersOpacityScale;
+    landRuntime.tallCanopyMaterial.size = (0.028 + clampedIntensity * 0.017) * flowersSizeScale;
+    landRuntime.blossomMaterial.opacity =
+      (0.05 + 0.46 * flowersWeight) * intensityFactor * flowersOpacityScale;
+    landRuntime.blossomMaterial.size = (0.025 + clampedIntensity * 0.014) * flowersSizeScale;
+    landRuntime.coastSprayMaterial.opacity =
+      (0.12 + 0.2 * flowersWeight) * (0.6 + intensityFactor * 0.35) * flowersOpacityScale;
     landRuntime.coastSprayMaterial.size = 0.018 + clampedIntensity * 0.006;
     landRuntime.coastlineMaterials.forEach((material) => {
       material.opacity = 0.06 + intensityFactor * 0.1;
@@ -1041,9 +1131,14 @@ export function bootstrap(root: HTMLDivElement): void {
     vegetationRuntime.group.visible = flowersWeight > 0.015;
     vegetationRuntime.sprites.forEach((sprite, index) => {
       const material = sprite.material as THREE.SpriteMaterial;
-      material.opacity = (0.08 + 0.84 * flowersWeight) * (0.6 + intensityFactor * 0.4);
+      material.opacity =
+        (0.08 + 0.84 * flowersWeight) * (0.6 + intensityFactor * 0.4) * flowersOpacityScale;
       const sway = 0.92 + 0.08 * Math.sin(elapsed * 1.1 + index * 0.13);
-      const scale = vegetationRuntime.baseScales[index] * (0.7 + clampedIntensity * 0.35) * sway;
+      const scale =
+        vegetationRuntime.baseScales[index] *
+        (0.7 + clampedIntensity * 0.35) *
+        sway *
+        flowersSizeScale;
       sprite.scale.setScalar(scale);
     });
   }
@@ -2059,12 +2154,16 @@ function createFairyLayer(perfTier: PerformanceTier): {
 
 function createDestinationMarker(destination: Destination): DestinationMesh {
   const position = latLonToVector3(destination.lat, destination.lon, RADIUS + 0.022);
+  const markerStyle = destination.visual?.markerStyle ?? "dot";
+  const priority = THREE.MathUtils.clamp(destination.visual?.priority ?? 1, 0, 5);
+  const priorityScale = 0.78 + priority * 0.12;
+  const baseRadius = markerStyle === "beam" ? 0.019 : markerStyle === "ring" ? 0.017 : 0.018;
   const marker = new THREE.Mesh(
-    new THREE.SphereGeometry(0.018, 14, 14),
+    new THREE.SphereGeometry(baseRadius * priorityScale, 20, 20),
     new THREE.MeshStandardMaterial({
       color: "#ffe2a5",
       emissive: "#f6c573",
-      emissiveIntensity: 0.9,
+      emissiveIntensity: 0.85 + priorityScale * 0.2,
       metalness: 0.11,
       roughness: 0.37,
       transparent: true,
@@ -2072,13 +2171,16 @@ function createDestinationMarker(destination: Destination): DestinationMesh {
     })
   ) as DestinationMesh;
   marker.position.copy(position);
+  marker.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), position.clone().normalize());
   marker.userData = {
     destination,
-    pulsePhase: Math.random() * Math.PI * 2
+    pulsePhase: Math.random() * Math.PI * 2,
+    markerStyle,
+    priorityScale
   };
 
   const aura = new THREE.Mesh(
-    new THREE.SphereGeometry(0.027, 12, 12),
+    new THREE.SphereGeometry((0.024 + priorityScale * 0.004) * (markerStyle === "beam" ? 1.18 : 1), 12, 12),
     new THREE.MeshBasicMaterial({
       color: "#ffdca6",
       transparent: true,
@@ -2088,6 +2190,37 @@ function createDestinationMarker(destination: Destination): DestinationMesh {
     })
   );
   marker.add(aura);
+
+  if (markerStyle === "ring") {
+    const ring = new THREE.Mesh(
+      new THREE.TorusGeometry(0.018 + priorityScale * 0.003, 0.0022, 8, 24),
+      new THREE.MeshBasicMaterial({
+        color: "#b7ddff",
+        transparent: true,
+        opacity: 0.62,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false
+      })
+    );
+    ring.rotation.x = Math.PI * 0.5;
+    marker.add(ring);
+  }
+
+  if (markerStyle === "beam") {
+    const beam = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.0018, 0.0062, 0.095 + priorityScale * 0.02, 10, 1, true),
+      new THREE.MeshBasicMaterial({
+        color: "#ffd6a8",
+        transparent: true,
+        opacity: 0.36,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        side: THREE.DoubleSide
+      })
+    );
+    beam.position.y = 0.048 + priorityScale * 0.01;
+    marker.add(beam);
+  }
 
   return marker;
 }
@@ -2120,31 +2253,46 @@ function createAuroraBand(perfTier: PerformanceTier): THREE.Group {
   return group;
 }
 
-function rebuildDestinationRoutes(group: THREE.Group): THREE.LineBasicMaterial[] {
+function rebuildDestinationRoutes(
+  group: THREE.Group,
+  destinations: Destination[]
+): THREE.LineBasicMaterial[] {
   group.clear();
   const routeMaterials: THREE.LineBasicMaterial[] = [];
   const grouped = new Map<RegionId, Destination[]>();
 
-  DESTINATIONS.forEach((destination) => {
-    if (!grouped.has(destination.regionId)) {
-      grouped.set(destination.regionId, []);
-    }
-    grouped.get(destination.regionId)?.push(destination);
-  });
+  destinations
+    .filter((destination) => destination.tags.includes(DESTINATIONS_THEME))
+    .forEach((destination) => {
+      if (!grouped.has(destination.regionId)) {
+        grouped.set(destination.regionId, []);
+      }
+      grouped.get(destination.regionId)?.push(destination);
+    });
 
   grouped.forEach((items) => {
     if (items.length < 2) {
       return;
     }
-    for (let i = 0; i < items.length - 1; i += 1) {
-      const from = latLonToVector3(items[i].lat, items[i].lon, RADIUS + 0.015);
-      const to = latLonToVector3(items[i + 1].lat, items[i + 1].lon, RADIUS + 0.015);
+    const sortedItems = [...items].sort((a, b) => {
+      const priorityDiff = (b.visual?.priority ?? 0) - (a.visual?.priority ?? 0);
+      if (priorityDiff !== 0) {
+        return priorityDiff;
+      }
+      return a.id.localeCompare(b.id);
+    });
+    for (let i = 0; i < sortedItems.length - 1; i += 1) {
+      const fromItem = sortedItems[i];
+      const toItem = sortedItems[i + 1];
+      const from = latLonToVector3(fromItem.lat, fromItem.lon, RADIUS + 0.015);
+      const to = latLonToVector3(toItem.lat, toItem.lon, RADIUS + 0.015);
       const mid = from.clone().add(to).normalize().multiplyScalar(RADIUS + 0.2);
       const curve = new THREE.QuadraticBezierCurve3(from, mid, to);
+      const avgPriority = ((fromItem.visual?.priority ?? 1) + (toItem.visual?.priority ?? 1)) / 2;
       const lineMaterial = new THREE.LineBasicMaterial({
         color: "#9edfff",
         transparent: true,
-        opacity: 0.3
+        opacity: THREE.MathUtils.clamp(0.18 + avgPriority * 0.08, 0.18, 0.58)
       });
       const line = new THREE.Line(
         new THREE.BufferGeometry().setFromPoints(curve.getPoints(42)),
@@ -2205,15 +2353,17 @@ function updateChipsState(container: HTMLDivElement, selectedRegion: RegionId): 
 
 function renderThemeChips(
   container: HTMLDivElement,
+  themeConfigs: ThemeConfig[],
   themes: Set<ThemeId>,
   onToggle: (themeId: ThemeId) => void
 ): void {
   container.innerHTML = "";
-  THEME_IDS.forEach((themeId) => {
+  themeConfigs.forEach((themeConfig) => {
+    const themeId = themeConfig.id;
     const button = document.createElement("button");
     button.className = "chip";
     button.dataset.themeId = themeId;
-    button.textContent = THEME_LABELS[themeId];
+    button.textContent = themeConfig.label || THEME_LABELS[themeId] || themeId;
     button.classList.toggle("active", themes.has(themeId));
     button.addEventListener("click", () => onToggle(themeId));
     container.appendChild(button);

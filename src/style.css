@@ -38,17 +38,20 @@ body {
   top: 14px;
   right: 14px;
   z-index: 6;
-  border: 1px solid #5b7892;
-  background: color-mix(in oklab, #112535 84%, transparent);
+  border: 1px solid #4e6a83;
+  background: color-mix(in oklab, #102233 70%, transparent);
   color: #e7f2fb;
   border-radius: 999px;
-  padding: 5px 12px;
-  font-size: 0.76rem;
+  padding: 4px 10px;
+  font-size: 0.74rem;
+  backdrop-filter: blur(8px);
   cursor: pointer;
+  opacity: 0.78;
 }
 
 .ui-mode-btn:hover {
   border-color: #9cc5ea;
+  opacity: 1;
 }
 
 #globe-canvas {
@@ -60,11 +63,11 @@ body {
 .panel {
   position: absolute;
   z-index: 3;
-  backdrop-filter: blur(10px) saturate(130%);
-  background: color-mix(in oklab, #0f1f2f 80%, transparent);
+  backdrop-filter: blur(9px) saturate(122%);
+  background: color-mix(in oklab, #0f1f2f 72%, transparent);
   border: 1px solid #42627e;
   border-radius: 14px;
-  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.32);
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.26);
   transition: opacity 220ms ease, transform 220ms ease;
 }
 
@@ -77,19 +80,23 @@ body {
 .panel-left {
   top: 18px;
   left: 18px;
-  width: 340px;
-  padding: 14px;
+  width: 318px;
+  padding: 12px;
   display: grid;
-  gap: 12px;
+  gap: 10px;
+  max-height: calc(100vh - 44px);
+  overflow: auto;
 }
 
 .panel-right {
   top: 18px;
   right: 18px;
-  width: 270px;
-  padding: 12px;
+  width: 252px;
+  padding: 11px;
   display: grid;
-  gap: 10px;
+  gap: 9px;
+  max-height: calc(100vh - 44px);
+  overflow: auto;
 }
 
 .block h2 {
@@ -145,9 +152,9 @@ input[type="range"] {
 
 .status-line {
   margin: 0;
-  font-size: 0.79rem;
+  font-size: 0.75rem;
   line-height: 1.45;
-  color: #c8dff1;
+  color: #b8d3e8;
   border-top: 1px solid #2f4b64;
   padding-top: 8px;
 }
@@ -169,7 +176,7 @@ input[type="range"] {
   border-radius: 10px;
   padding: 10px;
   background: color-mix(in oklab, #122235 90%, transparent);
-  min-height: 80px;
+  min-height: 72px;
 }
 
 .info-card h3 {
@@ -195,7 +202,8 @@ input[type="range"] {
     left: 12px;
     top: 12px;
     padding: 10px;
-    gap: 10px;
+    gap: 9px;
+    max-height: 44vh;
   }
 
   .panel-right {
@@ -206,6 +214,7 @@ input[type="range"] {
     bottom: 12px;
     padding: 10px;
     gap: 8px;
+    max-height: 40vh;
   }
 
   .chips {
@@ -215,5 +224,14 @@ input[type="range"] {
   .chip {
     padding: 5px 10px;
     font-size: 0.77rem;
+  }
+
+  .status-line {
+    font-size: 0.72rem;
+    line-height: 1.35;
+  }
+
+  .info-card p {
+    font-size: 0.8rem;
   }
 }

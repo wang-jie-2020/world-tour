@@ -22,6 +22,12 @@ Open:
 
 Do not open with `file://` (browser CORS will block module loading).
 
+Story configuration variants for M2/M3 validation:
+
+- `http://localhost:5173/?story=dense` (default, many narrative nodes)
+- `http://localhost:5173/?story=sparse` (reduced narrative nodes)
+- `http://localhost:5173/?story=empty` (0 narrative nodes, verifies `0..N`)
+
 ## Implemented (1-8 Round)
 
 - GeoJSON-driven world contours with LOD selection (`low/medium/high`).
@@ -67,4 +73,3 @@ npm run build
 ```
 
 Build passes. Vite still warns about bundle size due to Three.js + postprocessing + sprite assets.
-

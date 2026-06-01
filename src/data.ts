@@ -1,4 +1,11 @@
-import type { Destination, Region } from "./types";
+import type {
+  Destination,
+  NarrativeNodeConfig,
+  Region,
+  StoryConfig,
+  ThemeConfig,
+  ThemeId
+} from "./types";
 
 export const REGIONS: Region[] = [
   {
@@ -59,7 +66,42 @@ export const REGIONS: Region[] = [
   }
 ];
 
-export const DESTINATIONS: Destination[] = [
+const BASE_THEMES: ThemeConfig[] = [
+  {
+    id: "flowers",
+    label: "Flowers",
+    enabledByDefault: true,
+    stackable: true,
+    renderProfile: {
+      opacityScale: 1,
+      sizeScale: 1
+    }
+  },
+  {
+    id: "fairy",
+    label: "Fairy",
+    enabledByDefault: false,
+    stackable: true,
+    renderProfile: {
+      opacityScale: 1,
+      trailOpacityScale: 1,
+      rotationSpeedScale: 1
+    }
+  },
+  {
+    id: "destinations",
+    label: "Destinations",
+    enabledByDefault: true,
+    stackable: true,
+    renderProfile: {
+      opacityScale: 1,
+      routeOpacityScale: 1,
+      emissiveScale: 1
+    }
+  }
+];
+
+const LEGACY_DESTINATIONS: Destination[] = [
   { id: "paris", regionId: "europe", name: "Paris", lat: 48.8566, lon: 2.3522, tags: ["flowers", "destinations"] },
   { id: "amsterdam", regionId: "europe", name: "Amsterdam", lat: 52.3676, lon: 4.9041, tags: ["flowers", "fairy"] },
   { id: "prague", regionId: "europe", name: "Prague", lat: 50.0755, lon: 14.4378, tags: ["fairy", "destinations"] },
@@ -102,8 +144,134 @@ export const DESTINATIONS: Destination[] = [
   { id: "rotorua", regionId: "oceania", name: "Rotorua", lat: -38.1368, lon: 176.2497, tags: ["fairy", "destinations"] }
 ];
 
-export const THEME_LABELS: Record<string, string> = {
-  flowers: "Flowers",
-  fairy: "Fairy",
-  destinations: "Destinations"
+type StoryVariant = "dense" | "sparse" | "empty";
+
+function dedupeThemeTags(tags: ThemeId[], primary: ThemeId): ThemeId[] {
+  const all = [primary, ...tags];
+  return all.filter((tag, index) => all.indexOf(tag) === index);
+}
+
+function toNarrativeNode(destination: Destination, index: number): NarrativeNodeConfig {
+  const primaryTheme = destination.tags[0] ?? "destinations";
+  const markerStyle =
+    primaryTheme === "destinations" ? "beam" : primaryTheme === "fairy" ? "ring" : "dot";
+  const priority = primaryTheme === "destinations" ? 3 : primaryTheme === "fairy" ? 2 : 1;
+  const camera =
+    primaryTheme === "destinations"
+      ? { distance: 2.08, fov: 40, durationMs: 460 }
+      : primaryTheme === "fairy"
+        ? { distance: 2.16, fov: 41, durationMs: 420 }
+        : { distance: 2.22, fov: 42, durationMs: 380 };
+  return {
+    id: destination.id,
+    regionId: destination.regionId,
+    themeId: primaryTheme,
+    lat: destination.lat,
+    lon: destination.lon,
+    title: destination.name,
+    tags: dedupeThemeTags(destination.tags, primaryTheme),
+    description: `${destination.name} narrative node (${primaryTheme})`,
+    camera,
+    visual: {
+      markerStyle,
+      priority: priority + (index % 2)
+    }
+  };
+}
+
+function buildSparseNodes(nodes: NarrativeNodeConfig[]): NarrativeNodeConfig[] {
+  const selected: NarrativeNodeConfig[] = [];
+  REGIONS.forEach((region) => {
+    const inRegion = nodes.filter((node) => node.regionId === region.id);
+    if (inRegion.length === 0) {
+      return;
+    }
+    selected.push(inRegion[0]);
+    const secondary = inRegion.find((node) => node.themeId !== inRegion[0].themeId);
+    if (secondary) {
+      selected.push(secondary);
+    }
+  });
+  return selected;
+}
+
+function resolveStoryVariant(): StoryVariant {
+  if (typeof window === "undefined") {
+    return "dense";
+  }
+  const variant = new URLSearchParams(window.location.search).get("story");
+  if (variant === "sparse" || variant === "empty" || variant === "dense") {
+    return variant;
+  }
+  return "dense";
+}
+
+function validateStoryConfig(config: StoryConfig): void {
+  const issues: string[] = [];
+  config.nodes.forEach((node) => {
+    if (node.lat < -90 || node.lat > 90) {
+      issues.push(`Node ${node.id} has invalid lat ${node.lat}`);
+    }
+    if (node.lon < -180 || node.lon > 180) {
+      issues.push(`Node ${node.id} has invalid lon ${node.lon}`);
+    }
+    if (!config.themes.some((theme) => theme.id === node.themeId)) {
+      issues.push(`Node ${node.id} uses unknown theme ${node.themeId}`);
+    }
+  });
+  if (issues.length > 0) {
+    console.warn("[story-config] validation issues", issues);
+  }
+}
+
+const DENSE_NODES = LEGACY_DESTINATIONS.map((destination, index) => toNarrativeNode(destination, index));
+const SPARSE_NODES = buildSparseNodes(DENSE_NODES);
+
+export const STORY_VARIANTS: StoryVariant[] = ["dense", "sparse", "empty"];
+export const DENSE_STORY_CONFIG: StoryConfig = {
+  themes: BASE_THEMES,
+  nodes: DENSE_NODES
 };
+export const SPARSE_STORY_CONFIG: StoryConfig = {
+  themes: BASE_THEMES,
+  nodes: SPARSE_NODES
+};
+export const EMPTY_STORY_CONFIG: StoryConfig = {
+  themes: BASE_THEMES,
+  nodes: []
+};
+
+const STORY_CONFIGS_BY_VARIANT: Record<StoryVariant, StoryConfig> = {
+  dense: DENSE_STORY_CONFIG,
+  sparse: SPARSE_STORY_CONFIG,
+  empty: EMPTY_STORY_CONFIG
+};
+
+export const STORY_VARIANT: StoryVariant = resolveStoryVariant();
+export const STORY_CONFIG: StoryConfig = STORY_CONFIGS_BY_VARIANT[STORY_VARIANT];
+validateStoryConfig(STORY_CONFIG);
+
+export const THEME_CONFIGS: ThemeConfig[] = STORY_CONFIG.themes;
+export const NARRATIVE_NODES: NarrativeNodeConfig[] = STORY_CONFIG.nodes;
+export const NARRATIVE_NODE_COUNT = NARRATIVE_NODES.length;
+
+export const DESTINATIONS: Destination[] = STORY_CONFIG.nodes.map((node) => ({
+  id: node.id,
+  regionId: node.regionId,
+  name: node.title,
+  lat: node.lat,
+  lon: node.lon,
+  tags: dedupeThemeTags(node.tags ?? [], node.themeId),
+  themeId: node.themeId,
+  description: node.description,
+  camera: node.camera,
+  visual: node.visual
+}));
+
+export const THEME_LABELS: Record<ThemeId, string> = STORY_CONFIG.themes.reduce(
+  (acc, theme) => {
+    acc[theme.id] = theme.label;
+    return acc;
+  },
+  {} as Record<ThemeId, string>
+);
